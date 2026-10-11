@@ -4,18 +4,13 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local player = Players.LocalPlayer
 local DoorSystemEvent = ReplicatedStorage:WaitForChild("DoorSystemEvent")
 
-local gui = Instance.new("ScreenGui")
-gui.Name = "TeleportGUI"
-gui.ResetOnSpawn = false
-gui.Parent = player:WaitForChild("PlayerGui")
-
-local frame = Instance.new("Frame")
-frame.Size = UDim2.new(0, 430, 0, 355)
-frame.Position = UDim2.new(0, 20, 0.3, 0)
-frame.BackgroundColor3 = Color3.fromRGB(45, 35, 65)
-frame.Active = true
-frame.Draggable = true
-frame.Parent = gui
+-- Ссылка на уже готовый GUI (созданный в StarterGui)
+local gui = script.Parent -- Это и есть TeleportGUI
+local frame = gui:FindFirstChild("MainFrame")
+if not frame then
+	warn("Ошибка: не найден Frame с именем MainFrame внутри TeleportGUI. Создай его вручную в StarterGui.")
+	return
+end
 
 local function teleportTo(x, y, z)
 	local character = player.Character or player.CharacterAdded:Wait()
@@ -39,49 +34,52 @@ local function updateButtonTimer(btn, timeLeft)
 	end
 end
 
-local function createButton(xPos, yPos, text, doorId)
-	local btn = Instance.new("TextButton")
-	btn.Size = UDim2.new(0, 200, 0, 55)
-	btn.Position = UDim2.new(0, xPos, 0, yPos)
-	btn.Text = text
-	btn.TextScaled = true
-	btn.Parent = frame
-	
+-- Функция, которая связывает кнопку с ID двери
+local function linkButton(btn, doorId)
 	buttons[doorId] = btn
 	
 	btn.Activated:Connect(function()
 		-- Запрос на телепорт серверу
 		DoorSystemEvent:FireServer("requestTeleport", {doorId = doorId})
 	end)
-	
-	return btn
 end
 
--- Создаём кнопки (я объединил логику, чтобы не копировать 10 раз)
-createButton(10, 45, "🥚 Яйцо", 0)      -- Яйцо не привязано к таймеру дверей
-createButton(10, 105, "🏠 Дом 1 (Д1)", 1)
-createButton(10, 165, "🏠 Дом 2 (Д2)", 2)
-createButton(10, 225, "🏠 Дом 3 (Д3)", 3)
-createButton(10, 285, "🏠 Дом 4 (Д4)", 4)
-createButton(220, 45, "🏠 Дом 5 (Д5)", 5)
-createButton(220, 105, "🏠 Дом 6 (Д6)", 6)
-createButton(220, 165, "🏠 Дом 7 (Д7)", 7)
-createButton(220, 225, "🏠 Дом 8 (Д8)", 8)
-createButton(220, 285, "фарм", 9)       -- Фарм-зона
+-- Связываем существующие кнопки с ID дверей
+-- Важно: имена кнопок должны совпадать с тем, как ты их создал в StarterGui
+-- Например, кнопка "Дом 1" должна иметь имя "BtnDoor1" или похожее
+local allButtons = frame:GetDescendants()
+for _, obj in ipairs(allButtons) do
+	if obj:IsA("TextButton") then
+		local id = tonumber(obj.Name:match("BtnDoor(%d+)"))
+		if id then
+			linkButton(obj, id)
+		end
+		
+		-- Кнопка "Яйцо" (если она называется BtnEgg)
+		if obj.Name == "BtnEgg" then
+			obj.Activated:Connect(function()
+				teleportTo(7536.6, 19.7, 21943.4)
+			end)
+		end
+		
+		-- Кнопка "фарм" (если называется BtnFarm)
+		if obj.Name == "BtnFarm" then
+			obj.Activated:Connect(function()
+				teleportTo(7540.5, 16.2, 21967.8)
+			end)
+		end
+	end
+end
 
--- Кнопка закрытия
-local closeBtn = Instance.new("TextButton")
-closeBtn.Size = UDim2.new(0, 35, 0, 35)
-closeBtn.Position = UDim2.new(1, -35, 0, 0)
-closeBtn.Text = "X"
-closeBtn.TextScaled = true
-closeBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-closeBtn.TextColor3 = Color3.new(1, 1, 1)
-closeBtn.ZIndex = 10
-closeBtn.Active = true
-closeBtn.Visible = true
-closeBtn.Parent = frame
-closeBtn.Activated:Connect(function() gui:Destroy() end)
+-- Кнопка закрытия (должна называться BtnClose)
+local closeBtn = frame:FindFirstChild("BtnClose")
+if closeBtn then
+	closeBtn.Activated:Connect(function()
+		gui.Enabled = false -- Лучше отключать GUI, а не удалять
+	end)
+else
+	warn("Не найдена кнопка BtnClose в MainFrame. Добавь её и назови правильно.")
+end
 
 -- Обработка событий от сервера
 DoorSystemEvent.OnClientEvent:Connect(function(eventType, data)
@@ -91,18 +89,14 @@ DoorSystemEvent.OnClientEvent:Connect(function(eventType, data)
 		
 		-- АВТОТЕЛЕПОРТ: если кнопка существует, телепортируем игрока
 		if buttons[id] then
-			-- Небольшая задержка, чтобы анимация успела проиграться, или сразу
 			task.wait(0.5) 
-			-- Координаты можно взять из той же таблицы, что и на сервере, но здесь мы просто реагируем
-			-- Для точного телепорта лучше, чтобы сервер присылал позицию (см. allowTeleport ниже)
+			-- Здесь можно добавить автотелепорт к двери, если хочешь
+			-- teleportTo(doorPoints[id].X, doorPoints[id].Y, doorPoints[id].Z)
 		end
 		
 		-- Запускаем таймер для этой кнопки
 		if timerConnections[id] then timerConnections[id]:Disconnect() end
 		timerConnections[id] = RunService.Heartbeat:Connect(function()
-			local timePassed = tick() - data.openTime -- Упрощённо, лучше хранить время на клиенте отдельно
-			-- В реальном проекте время лучше считать на основе данных сервера, чтобы рассинхрона не было
-			-- Но для учебного примера хватит и так
 			local timeLeft = duration - (tick() - data.openTime)
 			updateButtonTimer(buttons[id], timeLeft)
 			
@@ -122,7 +116,6 @@ DoorSystemEvent.OnClientEvent:Connect(function(eventType, data)
 		end
 		
 	elseif eventType == "allowTeleport" then
-		-- Сервер разрешил телепорт и прислал координаты
 		teleportTo(data.position.X, data.position.Y, data.position.Z)
 		print("Телепорт разрешён сервером!")
 		
