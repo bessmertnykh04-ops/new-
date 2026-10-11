@@ -1,113 +1,32 @@
 local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local player = Players.LocalPlayer
 
+-- Находим кнопку по имени
 local gui = script.Parent
 local frame = gui:FindFirstChild("MainFrame")
-
 if not frame then
-	warn("[ОШИБКА] В TeleportGUI нет Frame с именем MainFrame! Проверь имена в редакторе.")
+	warn("[КРИТИЧНО] Нет MainFrame в SimpleMenu! Проверь имена.")
 	return
 end
 
+local btn = frame:FindFirstChild("BtnTest")
+if not btn then
+	warn("[КРИТИЧНО] Нет кнопки BtnTest! Проверь имя.")
+	return
+end
+
+-- Функция телепорта
 local function teleportTo(x, y, z)
 	local character = player.Character or player.CharacterAdded:Wait()
 	local root = character:WaitForChild("HumanoidRootPart")
 	root.CFrame = CFrame.new(x, y, z)
 end
 
-local buttons = {}
-local timerConnections = {}
+-- Логика кнопки
+btn.Activated:Connect(function()
+	teleportTo(7536.6, 19.7, 21943.4)
+	print("ТЕЛЕПОРТ СРАБОТАЛ!")
+end)
 
-local function updateButtonTimer(btn, timeLeft)
-	if timeLeft <= 0 then
-		btn.Text = "🚪 Дверь открыта!"
-		btn.BackgroundColor3 = Color3.fromRGB(0, 255, 0)
-	else
-		local mins = math.floor(timeLeft / 60)
-		local secs = timeLeft % 60
-		btn.Text = string.format("🚪 Откроется через: %02d:%02d", mins, secs)
-		btn.BackgroundColor3 = Color3.fromRGB(200, 100, 0)
-	end
-end
-
--- Находим кнопки по их именам и вешаем логику
-for _, obj in ipairs(frame:GetDescendants()) do
-	if obj:IsA("TextButton") then
-		-- Двери: BtnDoor1...BtnDoor8
-		local id = tonumber(obj.Name:match("BtnDoor(%d+)"))
-		if id then
-			buttons[id] = obj
-			obj.Activated:Connect(function()
-				local DoorSystemEvent = ReplicatedStorage:FindFirstChild("DoorSystemEvent")
-				if DoorSystemEvent then
-					DoorSystemEvent:FireServer("requestTeleport", {doorId = id})
-				else
-					warn("Нет RemoteEvent 'DoorSystemEvent'!")
-				end
-			end)
-		end
-
-		-- Яйцо
-		if obj.Name == "BtnEgg" then
-			obj.Activated:Connect(function()
-				teleportTo(7536.6, 19.7, 21943.4)
-			end)
-		end
-
-		-- Фарм
-		if obj.Name == "BtnFarm" then
-			obj.Activated:Connect(function()
-				teleportTo(7540.5, 16.2, 21967.8)
-			end)
-		end
-
-		-- Закрыть
-		if obj.Name == "BtnClose" then
-			obj.Activated:Connect(function()
-				gui.Enabled = false
-			end)
-		end
-	end
-end
-
--- Слушаем сервер
-local DoorSystemEvent = ReplicatedStorage:WaitForChild("DoorSystemEvent", 15)
-if DoorSystemEvent then
-	DoorSystemEvent.OnClientEvent:Connect(function(eventType, data)
-		if eventType == "doorOpened" then
-			local id = data.doorId
-			local duration = data.duration
-			
-			if buttons[id] then
-				task.wait(0.5)
-			end
-			
-			if timerConnections[id] then timerConnections[id]:Disconnect() end
-			timerConnections[id] = RunService.Heartbeat:Connect(function()
-				local timeLeft = duration - (tick() - data.openTime)
-				updateButtonTimer(buttons[id], timeLeft)
-				
-				if timeLeft <= 0 then
-					timerConnections[id]:Disconnect()
-					buttons[id].Text = "🚪 Дверь закрыта"
-					buttons[id].BackgroundColor3 = Color3.fromRGB(100, 100, 100)
-				end
-			end)
-		elseif eventType == "doorClosed" then
-			local id = data.doorId
-			if timerConnections[id] then timerConnections[id]:Disconnect() end
-			if buttons[id] then
-				buttons[id].Text = "🚪 Дверь закрыта"
-				buttons[id].BackgroundColor3 = Color3.fromRGB(100, 100, 100)
-			end
-		elseif eventType == "allowTeleport" then
-			teleportTo(data.position.X, data.position.Y, data.position.Z)
-		elseif eventType == "teleportDenied" then
-			warn("Нельзя телепортироваться!")
-		end
-	end)
-else
-	warn("Не найден RemoteEvent 'DoorSystemEvent'. Без него таймеры и телепорты по дверям не работают.")
-end
+print("Меню SimpleMenu загружено.")
