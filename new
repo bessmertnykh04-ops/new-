@@ -1,15 +1,17 @@
 local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local player = Players.LocalPlayer
-local DoorSystemEvent = ReplicatedStorage:WaitForChild("DoorSystemEvent")
 
--- Ссылка на уже готовый GUI (созданный в StarterGui)
-local gui = script.Parent -- Это и есть TeleportGUI
-local frame = gui:FindFirstChild("MainFrame")
-if not frame then
-	warn("Ошибка: не найден Frame с именем MainFrame внутри TeleportGUI. Создай его вручную в StarterGui.")
-	return
+-- Проверка RemoteEvent
+local DoorSystemEvent
+local success, result = pcall(function()
+	return ReplicatedStorage:WaitForChild("DoorSystemEvent")
+end)
+
+if not success then
+	warn("[ОШИБКА] В ReplicatedStorage нет RemoteEvent с именем DoorSystemEvent! Создай его!")
+	-- Если нет события, дальше смысла нет, но GUI всё равно покажем для теста
+	DoorSystemEvent = nil
 end
 
 local function teleportTo(x, y, z)
@@ -18,108 +20,175 @@ local function teleportTo(x, y, z)
 	root.CFrame = CFrame.new(x, y, z)
 end
 
--- Таблица кнопок для хранения ссылок и таймеров
+-- ---------------------------------------------------------
+-- СОЗДАНИЕ GUI (один раз, без дублирования)
+-- ---------------------------------------------------------
+local guiName = "TeleportGUI"
+local existingGui = player:WaitForChild("PlayerGui"):FindFirstChild(guiName)
+
+if existingGui then
+	-- GUI уже есть, ничего не делаем
+	warn("GUI уже существует, используем его.")
+else
+	-- Создаём новый
+	local newGui = Instance.new("ScreenGui")
+	newGui.Name = guiName
+	newGui.ResetOnSpawn = false
+	newGui.Parent = player.PlayerGui
+	
+	local frame = Instance.new("Frame")
+	frame.Size = UDim2.new(0, 430, 0, 355)
+	frame.Position = UDim2.new(0, 20, 0.3, 0)
+	frame.BackgroundColor3 = Color3.fromRGB(45, 35, 65)
+	frame.Active = true
+	frame.Draggable = true
+	frame.Parent = newGui
+	
+	-- Функция для создания кнопки
+	local function createButton(xPos, yPos, text, doorId, isSpecial = false)
+		local btn = Instance.new("TextButton")
+		btn.Size = UDim2.new(0, 200, 0, 55)
+		btn.Position = UDim2.new(0, xPos, 0, yPos)
+		btn.Text = text
+		btn.TextScaled = true
+		btn.Parent = frame
+		
+		if not isSpecial then
+			-- Обычная кнопка двери: запрос телепорта серверу
+			btn.Activated:Connect(function()
+				if DoorSystemEvent then
+					DoorSystemEvent:FireServer("requestTeleport", {doorId = doorId})
+				else
+					warn("Нет DoorSystemEvent — телепорт не сработает!")
+				end
+			end)
+		else
+			-- Спец-кнопка (яйцо, фарм): прямой телепорт (для теста)
+			local coords
+			if text:find("Яйцо") then
+				coords = {x=7536.6, y=19.7, z=21943.4}
+			elseif text:find("фарм") then
+				coords = {x=7540.5, y=16.2, z=21967.8}
+			end
+			
+			if coords then
+				btn.Activated:Connect(function()
+					teleportTo(coords.x, coords.y, coords.z)
+				end)
+			end
+		end
+		
+		return btn
+	end
+	
+	-- Кнопки дверей (Д1–Д8)
+	createButton(10, 45, "🏠 Дом 1 (Д1)", 1)
+	createButton(10, 105, "🏠 Дом 2 (Д2)", 2)
+	createButton(10, 165, "🏠 Дом 3 (Д3)", 3)
+	createButton(10, 225, "🏠 Дом 4 (Д4)", 4)
+	createButton(220, 45, "🏠 Дом 5 (Д5)", 5)
+	createButton(220, 105, "🏠 Дом 6 (Д6)", 6)
+	createButton(220, 165, "🏠 Дом 7 (Д7)", 7)
+	createButton(220, 225, "🏠 Дом 8 (Д8)", 8)
+	
+	-- Спец-кнопки
+	createButton(10, 285, "🥚 Яйцо", 0, true)
+	createButton(220, 285, "фарм", 9, true)
+	
+	-- Кнопка закрытия
+	local closeBtn = Instance.new("TextButton")
+	closeBtn.Size = UDim2.new(0, 35, 0, 35)
+	closeBtn.Position = UDim2.new(1, -35, 0, 0)
+	closeBtn.Text = "X"
+	closeBtn.TextScaled = true
+	closeBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+	closeBtn.TextColor3 = Color3.new(1, 1, 1)
+	closeBtn.ZIndex = 10
+	closeBtn.Parent = frame
+	
+	closeBtn.Activated:Connect(function()
+		newGui.Enabled = false -- Просто отключаем, а не удаляем
+	end)
+end
+
+-- Теперь находим созданный (или существующий) GUI, чтобы повесить логику
+local gui = player.PlayerGui:FindFirstChild(guiName)
+if not gui then return end
+local frame = gui:FindFirstChildWhichIsA("Frame")
+if not frame then return end
+
+-- Логика таймеров и событий (оставляем как была)
 local buttons = {}
 local timerConnections = {}
 
 local function updateButtonTimer(btn, timeLeft)
 	if timeLeft <= 0 then
 		btn.Text = "🚪 Дверь открыта!"
-		btn.BackgroundColor3 = Color3.fromRGB(0, 255, 0) -- Зелёный
+		btn.BackgroundColor3 = Color3.fromRGB(0, 255, 0)
 	else
 		local mins = math.floor(timeLeft / 60)
 		local secs = timeLeft % 60
 		btn.Text = string.format("🚪 Откроется через: %02d:%02d", mins, secs)
-		btn.BackgroundColor3 = Color3.fromRGB(200, 100, 0) -- Оранжевый
+		btn.BackgroundColor3 = Color3.fromRGB(200, 100, 0)
 	end
 end
 
--- Функция, которая связывает кнопку с ID двери
-local function linkButton(btn, doorId)
-	buttons[doorId] = btn
-	
-	btn.Activated:Connect(function()
-		-- Запрос на телепорт серверу
-		DoorSystemEvent:FireServer("requestTeleport", {doorId = doorId})
-	end)
-end
-
--- Связываем существующие кнопки с ID дверей
--- Важно: имена кнопок должны совпадать с тем, как ты их создал в StarterGui
--- Например, кнопка "Дом 1" должна иметь имя "BtnDoor1" или похожее
-local allButtons = frame:GetDescendants()
-for _, obj in ipairs(allButtons) do
+-- Находим кнопки по тексту (чтобы не зависеть от имён)
+for _, obj in ipairs(frame:GetDescendants()) do
 	if obj:IsA("TextButton") then
-		local id = tonumber(obj.Name:match("BtnDoor(%d+)"))
+		local id = nil
+		if obj.Text:match("Д1") then id = 1
+		elseif obj.Text:match("Д2") then id = 2
+		elseif obj.Text:match("Д3") then id = 3
+		elseif obj.Text:match("Д4") then id = 4
+		elseif obj.Text:match("Д5") then id = 5
+		elseif obj.Text:match("Д6") then id = 6
+		elseif obj.Text:match("Д7") then id = 7
+		elseif obj.Text:match("Д8") then id = 8
+		end
 		if id then
-			linkButton(obj, id)
-		end
-		
-		-- Кнопка "Яйцо" (если она называется BtnEgg)
-		if obj.Name == "BtnEgg" then
-			obj.Activated:Connect(function()
-				teleportTo(7536.6, 19.7, 21943.4)
-			end)
-		end
-		
-		-- Кнопка "фарм" (если называется BtnFarm)
-		if obj.Name == "BtnFarm" then
-			obj.Activated:Connect(function()
-				teleportTo(7540.5, 16.2, 21967.8)
-			end)
+			buttons[id] = obj
 		end
 	end
 end
 
--- Кнопка закрытия (должна называться BtnClose)
-local closeBtn = frame:FindFirstChild("BtnClose")
-if closeBtn then
-	closeBtn.Activated:Connect(function()
-		gui.Enabled = false -- Лучше отключать GUI, а не удалять
-	end)
-else
-	warn("Не найдена кнопка BtnClose в MainFrame. Добавь её и назови правильно.")
-end
-
--- Обработка событий от сервера
-DoorSystemEvent.OnClientEvent:Connect(function(eventType, data)
-	if eventType == "doorOpened" then
-		local id = data.doorId
-		local duration = data.duration
-		
-		-- АВТОТЕЛЕПОРТ: если кнопка существует, телепортируем игрока
-		if buttons[id] then
-			task.wait(0.5) 
-			-- Здесь можно добавить автотелепорт к двери, если хочешь
-			-- teleportTo(doorPoints[id].X, doorPoints[id].Y, doorPoints[id].Z)
-		end
-		
-		-- Запускаем таймер для этой кнопки
-		if timerConnections[id] then timerConnections[id]:Disconnect() end
-		timerConnections[id] = RunService.Heartbeat:Connect(function()
-			local timeLeft = duration - (tick() - data.openTime)
-			updateButtonTimer(buttons[id], timeLeft)
+if DoorSystemEvent then
+	DoorSystemEvent.OnClientEvent:Connect(function(eventType, data)
+		if eventType == "doorOpened" then
+			local id = data.doorId
+			local duration = data.duration
 			
-			if timeLeft <= 0 then
-				timerConnections[id]:Disconnect()
+			if buttons[id] then
+				task.wait(0.5)
+				-- Автотелепорт можно включить здесь, если нужно
+				-- teleportTo(...)
+			end
+			
+			if timerConnections[id] then timerConnections[id]:Disconnect() end
+			timerConnections[id] = game:GetService("RunService").Heartbeat:Connect(function()
+				local timeLeft = duration - (tick() - data.openTime)
+				updateButtonTimer(buttons[id], timeLeft)
+				if timeLeft <= 0 then
+					timerConnections[id]:Disconnect()
+					buttons[id].Text = "🚪 Дверь закрыта"
+					buttons[id].BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+				end
+			end)
+			
+		elseif eventType == "doorClosed" then
+			local id = data.doorId
+			if timerConnections[id] then timerConnections[id]:Disconnect() end
+			if buttons[id] then
 				buttons[id].Text = "🚪 Дверь закрыта"
 				buttons[id].BackgroundColor3 = Color3.fromRGB(100, 100, 100)
 			end
-		end)
-		
-	elseif eventType == "doorClosed" then
-		local id = data.doorId
-		if timerConnections[id] then timerConnections[id]:Disconnect() end
-		if buttons[id] then
-			buttons[id].Text = "🚪 Дверь закрыта"
-			buttons[id].BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+			
+		elseif eventType == "allowTeleport" then
+			teleportTo(data.position.X, data.position.Y, data.position.Z)
+		elseif eventType == "teleportDenied" then
+			warn("Нельзя телепортироваться: дверь закрыта!")
 		end
-		
-	elseif eventType == "allowTeleport" then
-		teleportTo(data.position.X, data.position.Y, data.position.Z)
-		print("Телепорт разрешён сервером!")
-		
-	elseif eventType == "teleportDenied" then
-		warn("Нельзя телепортироваться: дверь закрыта или выключена!")
-	end
-end)
+	end)
+else
+	warn("Логика таймеров не работает без DoorSystemEvent в ReplicatedStorage.")
+end
